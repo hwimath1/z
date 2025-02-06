@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>속도와 가속도</title>
+<!-- MathJax for LaTeX rendering -->
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" defer></script>
+<style>
+  /* ===== 흑백 색상 구성 ===== */
+  body {
+    background-color: #fff;     /* 흰색 */
+    color: #000;                /* 검은색 */
+    font-family: sans-serif;
+    margin: 0; 
+    padding: 0;
+  }
+  #mainContainer {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 1rem;
+    text-align: left;
+  }
+  #nameInputContainer {
+    text-align: center;
+    margin-top: 50px;
+  }
+  #startContainer, 
+  #quizContainer, 
+  #endContainer {
+    display: none;
+  }
+  /* 난이도 선택 부분 */
+  #difficultySelect label {
+    margin-right: 10px;
+  }
+  /* 에너지바 */
+  #energyBarContainer {
+    width: 100%; 
+    height: 20px; 
+    background-color: #ccc; 
+    margin-top: 5px; 
+    margin-bottom: 10px; 
+    position: relative;
+  }
+  #energyBar {
+    width: 100%;
+    height: 100%;
+    background-color: #000; /* 검은색 바 */
+  }
+  /* 상태 표시 */
+  #livesDisplay, 
+  #scoreDisplay, 
+  #timerDisplay, 
+  #overallTimeDisplay {
+    margin: 5px 0;
+  }
+  /* 문제 영역 */
+  #questionArea {
+    margin: 1rem 0;
+  }
+  .answerChoice {
+    margin: 0.5rem 0;
+    cursor: pointer;
+  }
+  /* 버튼 공통 스타일 */
+  button {
+    background-color: #000;
+    color: #fff;
+    padding: 0.5rem 1rem;
+    border: none;
+    cursor: pointer;
+    margin: 5px;
+  }
+  button:hover {
+    opacity: 0.8;
+  }
+  /* 결과 표시 */
+  #response {
+    white-space: pre-wrap;
+    margin-top: 1rem;
+    color: #000;
+  }
+  /* 종료 화면 */
+  #endContainer {
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<div id="mainContainer">
+
+  <!-- ===== [이름 입력 화면] ===== -->
+  <div id="nameInputContainer">
+    <h1>속도와 가속도</h1>
+    <input type="text" id="userName" placeholder="이름을 입력하세요" style="font-size:1rem; padding:5px;">
+    <br><br>
+    <button id="goToStartBtn">다음</button>
+  </div>
+
+  <!-- ===== [난이도 선택 화면] ===== -->
+  <div id="startContainer">
+    <h2>난이도를 선택하세요</h2>
+    <div id="difficultySelect">
+      <label><input type="radio" name="difficulty" value="최상">최상 (20초, 문제당 20점)</label><br>
+      <label><input type="radio" name="difficulty" value="상">상 (30초, 문제당 15점)</label><br>
+      <label><input type="radio" name="difficulty" value="중">중 (40초, 문제당 13점)</label><br>
+      <label><input type="radio" name="difficulty" value="하">하 (시간제한없음, 문제당 10점)</label>
+    </div>
+    <button id="startBtn">시작하기</button>
+  </div>
+
+  <!-- ===== [퀴즈 진행 화면] ===== -->
+  <div id="quizContainer">
+    <div id="timerDisplay"></div>
+    <div id="energyBarContainer"><div id="energyBar"></div></div>
+    <div id="livesDisplay"></div>
+    <div id="scoreDisplay"></div>
+    <div id="overallTimeDisplay"></div>
+    <div id="questionArea"></div>
+  </div>
+
+  <!-- ===== [종료 화면] ===== -->
+  <div id="endContainer">
+    <h2 id="endMessage"></h2>
+    <p id="finalScore"></p>
+    <button id="sendScoreBtn">점수 전송</button>
+    <div id="response"></div>
+  </div>
+
+</div>
+
+<script>
+/* ------------------------------------------------------------------------
+   [MathJax 처리 함수] 
+   동적으로 생성된 수식을 렌더링하기 위해 호출
+------------------------------------------------------------------------ */
+function renderMath() {
+  if (typeof MathJax !== 'undefined') {
+    MathJax.typeset();
+  }
+}
+
+/* ------------------------------------------------------------------------
+   [게임 데이터 전송 함수]
+   문제에서 주어진 코드를 사용하여 서버에 데이터 전송
+------------------------------------------------------------------------ */
+function saveData(game, name, score, elapsedTime) {
+    const FUNCTION_URL = "https://us-central1-record-f420d.cloudfunctions.net/report";
+
+    const requestData = {
+        game,
+        name,
+        score: parseInt(score, 10),
+        elapsedTime: parseInt(elapsedTime, 10)
+    };
+
+    try {
+        fetch(FUNCTION_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(requestData)
+        })
+        .then(async (response) => {
+            const responseData = await response.json();
+            if (response.ok) {
+                document.getElementById('response').innerText = 
+                    "성공: " + JSON.stringify(responseData, null, 2);
+            } else {
+                document.getElementById('response').innerText = 
+                    "오류: " + JSON.stringify(responseData, null, 2);
+            }
+        })
+        .catch((error) => {
+            console.error('요청 실패:', error);
+            document.getElementById('response').innerText = 
+                "네트워크 오류: " + error.message;
+        });
+    } catch (error) {
+        console.error('요청 실패:', error);
+        document.getElementById('response').innerText = 
+            "네트워크 오류: " + error.message;
+    }
+}
+
+/* ------------------------------------------------------------------------
+   [문제 데이터]
+   - 각 answer 앞의 불필요한 공백 제거
+   - correct는 "(B)" 같은 식으로 저장
+   - answer는 "(B) -3" 같은 식으로 저장하여 startsWith 검사 가능
+------------------------------------------------------------------------ */
+const allQuestionsData = [
+  {
+    question: `조건: 물체 \\(P\\)의 위치가 \\(x(t) = 3t^2 - 9t + 6\\)일 때  
+문제: \\(t = 1\\)일 때의 속도 \\(v\\)를 구하시오.`,
+    answers: [
+      "(A) -6",
+      "(B) -3",
+      "(C) 0",
+      "(D) 3"
+    ],
+    correct: "(B)"
+  },
+  {
+    question: `조건: 물체 \\(P\\)의 위치가 \\(x(t) = 3t^2 - 9t + 6\\)일 때  
+문제: \\(t = 3\\)일 때의 가속도 \\(a\\)를 구하시오.`,
+    answers: [
+      "(A) 3",
+      "(B) 9",
+      "(C) 0",
+      "(D) 6"
+    ],
+    correct: "(D)"
+  },
+  {
+    question: `조건: 물체 \\(P\\)의 위치가 \\(x(t) = 3t^2 - 9t + 6\\)일 때  
+문제: 처음으로 움직이는 방향을 바꾸는 시각(출발 후 몇 초인지)을 구하시오.`,
+    answers: [
+      "(A) 1.5",
+      "(B) 2",
+      "(C) 1",
+      "(D) 0.5"
+    ],
+    correct: "(A)"
+  },
+  {
+    question: `조건: 물체 \\(P\\)의 위치가 \\(x(t) = -t^3 + 12t\\)일 때  
+문제: \\(t = 1\\)일 때의 속도 \\(v\\)를 구하시오.`,
+    answers: [
+      "(A) 3",
+      "(B) -3",
+      "(C) 9",
+      "(D) 12"
+    ],
+    correct: "(C)"
+  },
+  {
+    question: `조건: 물체 \\(P\\)의 위치가 \\(x(t) = -t^3 + 12t\\)일 때  
+문제: \\(t = 1\\)일 때의 가속도 \\(a\\)를 구하시오.`,
+    answers: [
+      "(A) -12",
+      "(B) 0",
+      "(C) -3",
+      "(D) -6"
+    ],
+    correct: "(D)"
+  },
+  {
+    question: `조건: 물체 \\(P\\)의 위치가 \\(x(t) = t^3 - 3t^2 + 2\\)일 때  
+문제: \\(t = 3\\)일 때의 속도 \\(v\\)를 구하시오.`,
+    answers: [
+      "(A) 0",
+      "(B) 9",
+      "(C) 6",
+      "(D) 12"
+    ],
+    correct: "(B)"
+  },
+  {
+    question: `조건: 물체 \\(P\\)의 위치가 \\(x(t) = t^3 - 3t^2 + 2\\)일 때  
+문제: \\(t = 3\\)일 때의 가속도 \\(a\\)를 구하시오.`,
+    answers: [
+      "(A) 6",
+      "(B) 9",
+      "(C) 12",
+      "(D) 15"
+    ],
+    correct: "(C)"
+  },
+  {
+    question: `조건: 물체 \\(P\\)의 위치가 \\(x(t) = t^3 - 3t^2 + 2\\)일 때  
+문제: 움직이는 방향을 바꾸는 시각(출발 후 몇 초인지)을 구하시오.`,
+    answers: [
+      "(A) 2",
+      "(B) 3",
+      "(C) 1",
+      "(D) 0.5"
+    ],
+    correct: "(A)"
+  },
+  {
+    question: `조건: 물체 \\(P\\)의 위치가 \\(x(t) = t^3 - 3t + 10\\)일 때  
+문제: \\(t = 3\\)일 때의 속도 \\(v\\)를 구하시오.`,
+    answers: [
+      "(A) 10",
+      "(B) 12",
+      "(C) 18",
+      "(D) 24"
+    ],
+    correct: "(D)"
+  },
+  {
+    question: `조건: 물체 \\(P\\)의 위치가 \\(x(t) = t^3 - 3t + 10\\)일 때  
+문제: \\(t = 3\\)일 때의 가속도 \\(a\\)를 구하시오.`,
+    answers: [
+      "(A) 6",
+      "(B) 18",
+      "(C) 12",
+      "(D) 24"
+    ],
+    correct: "(B)"
+  },
+  {
+    question: `조건: 물체 \\(P\\)의 위치가 \\(x(t) = t^3 - 3t + 10\\)일 때  
+문제: 움직이는 방향을 바꾸는 시각(출발 후 몇 초인지)을 구하시오.`,
+    answers: [
+      "(A) 2",
+      "(B) 3",
+      "(C) 1",
+      "(D) 1.5"
+    ],
+    correct: "(C)"
+  },
+  {
+    question: `조건: 물체 \\(P\\)의 위치가 \\(x(t) = t^3 - 6t^2 + 5\\)일 때  
+문제: \\(t = 3\\)일 때의 속도 \\(v\\)를 구하시오.`,
+    answers: [
+      "(A) -9",
+      "(B) 0",
+      "(C) -6",
+      "(D) 3"
+    ],
+    correct: "(A)"
+  },
+  {
+    question: `조건: 물체 \\(P\\)의 위치가 \\(x(t) = t^3 - 6t^2 + 5\\)일 때  
+문제: \\(t = 3\\)일 때의 가속도 \\(a\\)를 구하시오.`,
+    answers: [
+      "(A) 3",
+      "(B) -6",
+      "(C) 12",
+      "(D) 6"
+    ],
+    correct: "(D)"
+  },
+  {
+    question: `조건: 물체 \\(P\\)의 위치가 \\(x(t) = t^3 - 6t^2 + 5\\)일 때  
+문제: 움직이는 방향을 바꾸는 시각(출발 후 몇 초인지)을 구하시오.`,
+    answers: [
+      "(A) 2",
+      "(B) 4",
+      "(C) 3",
+      "(D) 1"
+    ],
+    correct: "(B)"
+  },
+  {
+    question: `조건: 물체 \\(P\\)의 위치가 \\(x(t) = t^3 - 2t^2 + t\\)일 때  
+문제: \\(t = 1\\)일 때의 속도 \\(v\\)를 구하시오.`,
+    answers: [
+      "(A) 1",
+      "(B) -1",
+      "(C) 0",
+      "(D) 2"
+    ],
+    correct: "(C)"
+  },
+  {
+    question: `조건: 물체 \\(P\\)의 위치가 \\(x(t) = t^3 - 2t^2 + t\\)일 때  
+문제: \\(t = 1\\)일 때의 가속도 \\(a\\)를 구하시오.`,
+    answers: [
+      "(A) 2",
+      "(B) 0",
+      "(C) -2",
+      "(D) 4"
+    ],
+    correct: "(A)"
+  },
+  {
+    question: `조건: 물체 \\(P\\)의 위치가 \\(x(t) = t^3 - 2t^2 + t\\)일 때  
+문제: 처음으로 움직이는 방향을 바꾸는 시각(출발 후 몇 초인지)을 구하시오.`,
+    answers: [
+      "(A) 0.5",
+      "(B) 1",
+      "(C) 0.666... (2/3)",
+      "(D) 0.333... (1/3)"
+    ],
+    correct: "(D)"
+  },
+  {
+    question: `조건: 물체 \\(P\\)의 위치가 \\(x(t) = t^3 - 9t^2 + 15t\\)일 때  
+문제: \\(t = 3\\)일 때의 속도 \\(v\\)를 구하시오.`,
+    answers: [
+      "(A) -6",
+      "(B) -12",
+      "(C) 6",
+      "(D) 12"
+    ],
+    correct: "(B)"
+  },
+  {
+    question: `조건: 물체 \\(P\\)의 위치가 \\(x(t) = t^3 - 9t^2 + 15t\\)일 때  
+문제: \\(t = 3\\)일 때의 가속도 \\(a\\)를 구하시오.`,
+    answers: [
+      "(A) 6",
+      "(B) -6",
+      "(C) 0",
+      "(D) -12"
+    ],
+    correct: "(C)"
+  },
+  {
+    question: `조건: 물체 \\(P\\)의 위치가 \\(x(t) = 4t^3 - 6t^2 + 1\\)이라 할 때,  
+문제: 속도가 9일 때의 가속도 \\(a\\)를 구하시오.`,
+    answers: [
+      "(A) 24",
+      "(B) 12",
+      "(C) 18",
+      "(D) 36"
+    ],
+    correct: "(A)"
+  },
+  {
+    question: `조건: 물체 \\(P\\)의 위치가 \\(x(t) = t^3 - 2t\\)일 때  
+문제: 속도가 100이 되는 시각에서의 가속도 \\(a\\)를 구하시오.`,
+    answers: [
+      "(A) 10√3",
+      "(B) 2√34",
+      "(C) 12",
+      "(D) 6√34"
+    ],
+    correct: "(D)"
+  },
+  {
+    question: `조건: 물체 \\(P\\)의 위치가 \\(x(t) = 2t^3 - 3t^2 - 12t\\)일 때  
+문제: 속도가 24일 때의 가속도 \\(a\\)를 구하시오.`,
+    answers: [
+      "(A) 36",
+      "(B) 30",
+      "(C) 24",
+      "(D) 12"
+    ],
+    correct: "(B)"
+  },
+  {
+    question: `조건: 물체 \\(P\\)의 위치가 \\(x(t) = t^3 - 3t^2\\)일 때  
+문제: 속도가 45일 때의 가속도 \\(a\\)를 구하시오.`,
+    answers: [
+      "(A) 30",
+      "(B) 12",
+      "(C) 24",
+      "(D) 36"
+    ],
+    correct: "(C)"
+  },
+  {
+    question: `조건: 두 물체 \\(P, Q\\)가 원점에서 출발하여,  
+\\(x_P(t) = t^2 + 4t\\), \\(x_Q(t) = t^3 - t + 5\\) 의 법칙으로 움직일 때  
+문제: 두 물체가 처음으로 만나는 시각(몇 초 후)을 구하시오.`,
+    answers: [
+      "(A) 1",
+      "(B) 2",
+      "(C) 0.5",
+      "(D) 1.5"
+    ],
+    correct: "(A)"
+  },
+  {
+    question: `조건: 위의 \\(P, Q\\)가 처음 만나는 시점에서,  
+\\(x_P(t) = t^2 + 4t\\), \\(x_Q(t) = t^3 - t + 5\\)  
+문제: 각각의 가속도 \\((a_P, a_Q)\\)를 구하시오.`,
+    answers: [
+      "(A) (2, 5)",
+      "(B) (2, 6)",
+      "(C) (3, 6)",
+      "(D) (1, 6)"
+    ],
+    correct: "(B)"
+  },
+  {
+    question: `조건: 지면에서 수직으로 던져 올린 공의 높이가 \\(x(t) = 30t - 5t^2\\)일 때  
+문제: \\(t = 1\\)초일 때 공의 속도와 가속도 \\((v, a)\\)를 구하시오.`,
+    answers: [
+      "(A) (15, -10)",
+      "(B) (25, -10)",
+      "(C) (20, -10)",
+      "(D) (20, -15)"
+    ],
+    correct: "(C)"
+  },
+  {
+    question: `조건: 위 공(\\(x(t) = 30t - 5t^2\\))이 도달할 수 있는 최고 높이를 구하시오.`,
+    answers: [
+      "(A) 30",
+      "(B) 25",
+      "(C) 40",
+      "(D) 45"
+    ],
+    correct: "(D)"
+  },
+  {
+    question: `조건: 지면에서 수직으로 던져 올린 물체의 높이가 \\(x(t) = 20t - 5t^2\\)일 때  
+문제: 이 물체가 최고 높이에 도달하는 데 걸리는 시간과 그때의 높이를 각각 구하시오.`,
+    answers: [
+      "(A) (2, 20)",
+      "(B) (2, 25)",
+      "(C) (4, 20)",
+      "(D) (4, 25)"
+    ],
+    correct: "(A)"
+  },
+  {
+    question: `조건: 위 물체(\\(x(t) = 20t - 5t^2\\))가 지면에 떨어지는 순간의 속도를 구하시오.`,
+    answers: [
+      "(A) -10",
+      "(B) -20",
+      "(C) 20",
+      "(D) 10"
+    ],
+    correct: "(B)"
+  },
+  {
+    question: `조건: 다이빙 선수가 수면으로부터의 높이가 \\(x(t) = -5t^2 + 10t + 15\\)일 때  
+문제: 뛰어오른 지 2초 후의 속도 \\(v\\)를 구하시오.`,
+    answers: [
+      "(A) -5",
+      "(B) 0",
+      "(C) -10",
+      "(D) 5"
+    ],
+    correct: "(C)"
+  },
+  {
+    question: `조건: 위 다이빙 선수(\\(x(t) = -5t^2 + 10t + 15\\))가 가장 높은 곳에 도달할 때까지 걸린 시간과 그때의 높이를 구하시오.`,
+    answers: [
+      "(A) (2, 20)",
+      "(B) (1, 15)",
+      "(C) (2, 25)",
+      "(D) (1, 20)"
+    ],
+    correct: "(D)"
+  },
+  {
+    question: `조건: 다이빙 선수(\\(x(t) = -5t^2 + 10t + 15\\))가 수면에 닿는 순간의 속도를 구하시오.`,
+    answers: [
+      "(A) -20",
+      "(B) -10",
+      "(C) -15",
+      "(D) 0"
+    ],
+    correct: "(A)"
+  },
+  {
+    question: `조건: 지면으로부터 15m 높이에서 위로 던져올린 물체의 높이가 \\(h(t) = 15 + 20t - 5t^2\\)일 때  
+문제: \\(t = 1\\)초 후의 속도와 가속도 \\((v, a)\\)를 구하시오.`,
+    answers: [
+      "(A) (10, -5)",
+      "(B) (10, -10)",
+      "(C) (15, -10)",
+      "(D) (5, -10)"
+    ],
+    correct: "(B)"
+  },
+  {
+    question: `조건: 위 물체(\\(h(t) = 15 + 20t - 5t^2\\))가 최고 높이에 도달할 때까지 걸린 시간과 그 높이를 구하시오.`,
+    answers: [
+      "(A) (2, 40)",
+      "(B) (3, 35)",
+      "(C) (2, 35)",
+      "(D) (1, 35)"
+    ],
+    correct: "(C)"
+  },
+  {
+    question: `조건: 직선 철로를 달리는 기차가 제동을 건 뒤 \\(x(t) = 26t - 0.65t^2\\)만큼 움직인다고 할 때  
+문제: \\(t = 2\\)초 후 속도와 가속도 \\((v, a)\\)를 구하시오.`,
+    answers: [
+      "(A) (23.0, -1.3)",
+      "(B) (24.0, -1.3)",
+      "(C) (26.0, -1.3)",
+      "(D) (23.4, -1.3)"
+    ],
+    correct: "(D)"
+  },
+  {
+    question: `조건: 위 기차(\\(x(t) = 26t - 0.65t^2\\))가 정지할 때까지 걸린 시간과 이동 거리를 구하시오.`,
+    answers: [
+      "(A) (20, 260)",
+      "(B) (10, 130)",
+      "(C) (20, 240)",
+      "(D) (30, 390)"
+    ],
+    correct: "(A)"
+  },
+  {
+    question: `조건: 직선 도로를 달리는 자동차가 제동을 건 뒤 \\(x(t) = 27t - 0.9t^2\\)만큼 움직인다고 할 때  
+문제: \\(t = 10\\)초 후 속도와 가속도 \\((v, a)\\)를 구하시오.`,
+    answers: [
+      "(A) (9.0, -1.2)",
+      "(B) (9.0, -1.8)",
+      "(C) (0, -1.8)",
+      "(D) (10.5, -1.8)"
+    ],
+    correct: "(B)"
+  },
+  {
+    question: `조건: 위 자동차(\\(x(t) = 27t - 0.9t^2\\))가 정지할 때까지 걸린 시간과 이동 거리를 구하시오.`,
+    answers: [
+      "(A) (10, 135)",
+      "(B) (15, 225)",
+      "(C) (15, 202.5)",
+      "(D) (10, 202.5)"
+    ],
+    correct: "(C)"
+  },
+  {
+    question: `조건: 달리는 열차가 제동을 건 뒤 \\(x(t) = 27t - 0.45t^2\\)만큼 움직인다고 할 때  
+문제: \\(t = 10\\)초 후의 속도와 가속도 \\((v, a)\\)를 구하시오.`,
+    answers: [
+      "(A) (20, -0.9)",
+      "(B) (18, -1.0)",
+      "(C) (24, -0.9)",
+      "(D) (18, -0.9)"
+    ],
+    correct: "(D)"
+  },
+  {
+    question: `조건: 위 열차(\\(x(t) = 27t - 0.45t^2\\))가 정지할 때까지 걸린 시간과 이동 거리를 구하시오.`,
+    answers: [
+      "(A) (30, 405)",
+      "(B) (15, 202.5)",
+      "(C) (20, 260)",
+      "(D) (10, 135)"
+    ],
+    correct: "(A)"
+  },
+  {
+    question: `조건: 달리는 열차가 제동을 건 뒤 \\(x(t) = 18t - 3t^2\\)만큼 움직인다고 할 때  
+문제: \\(t = 2\\)초 후 속도와 가속도 \\((v, a)\\)를 구하시오.`,
+    answers: [
+      "(A) (5, -6)",
+      "(B) (6, -6)",
+      "(C) (7, -6)",
+      "(D) (6, -5)"
+    ],
+    correct: "(B)"
+  },
+  {
+    question: `조건: 위 열차(\\(x(t) = 18t - 3t^2\\))가 정지할 때까지 걸린 시간과 이동 거리를 구하시오.`,
+    answers: [
+      "(A) (2, 20)",
+      "(B) (3, 20)",
+      "(C) (3, 27)",
+      "(D) (4, 27)"
+    ],
+    correct: "(C)"
+  },
+  {
+    question: `조건: 달리는 열차가 제동을 건 뒤 \\(x(t) = -5t^2 + 30t\\)만큼 움직인다고 할 때  
+문제: \\(t = 1\\)초 후 속도와 가속도 \\((v, a)\\)를 구하시오.`,
+    answers: [
+      "(A) (10, -10)",
+      "(B) (30, -10)",
+      "(C) (25, -10)",
+      "(D) (20, -10)"
+    ],
+    correct: "(D)"
+  },
+  {
+    question: `조건: 위 열차(\\(x(t) = -5t^2 + 30t\\))가 정지할 때까지 걸린 시간과 이동 거리를 구하시오.`,
+    answers: [
+      "(A) (3, 45)",
+      "(B) (2, 20)",
+      "(C) (4, 80)",
+      "(D) (6, 90)"
+    ],
+    correct: "(A)"
+  }
+];
+
+/* ------------------------------------------------------------------------
+   [문제/보기 순서 섞기 함수]
+   - 문제(questions)를 랜덤 섞기
+   - 보기의 순서는 4번 요구대로 변경 금지이므로 그대로 둠
+------------------------------------------------------------------------ */
+function shuffleArray(array) {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i+1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+}
+
+let questions = []; 
+let currentQuestionIndex = 0;
+let score = 0;
+let lives = 3;
+let gameStartTime = 0;    // 전체 게임 시간 측정
+let overallTimerInterval; // 전체 게임 타이머
+let currentTimer = 0;     // 현재 문제 제한시간(난이도별)
+let energyInterval;       // 에너지바 감소 타이머
+let selectedDifficulty = '하'; 
+let userName = "";
+
+/* 난이도별 설정 */
+const difficultySettings = {
+  '최상': { time: 20, points: 20 },
+  '상':   { time: 30, points: 15 },
+  '중':   { time: 40, points: 13 },
+  '하':   { time: 9999, points: 10 } // 사실상 무제한
+};
+
+/* ------------------------------------------------------------------------
+   [게임 초기화/시작]
+------------------------------------------------------------------------ */
+document.getElementById('goToStartBtn').addEventListener('click', () => {
+  userName = document.getElementById('userName').value.trim();
+  if (!userName) {
+    alert("이름을 입력해주세요.");
+    return;
+  }
+  document.getElementById('nameInputContainer').style.display = 'none';
+  document.getElementById('startContainer').style.display = 'block';
+});
+
+document.getElementById('startBtn').addEventListener('click', startGame);
+
+function startGame() {
+  // 난이도 확인
+  const radios = document.getElementsByName('difficulty');
+  let checked = false;
+  for (let r of radios) {
+    if (r.checked) {
+      selectedDifficulty = r.value;
+      checked = true;
+      break;
+    }
+  }
+  if (!checked) {
+    alert("난이도를 선택해주세요.");
+    return;
+  }
+
+  // 초기화
+  score = 0;
+  lives = 3;
+  document.getElementById('startContainer').style.display = 'none';
+  document.getElementById('quizContainer').style.display = 'block';
+  // 전체 게임 시간 측정 시작
+  gameStartTime = Date.now();
+  overallTimerInterval = setInterval(updateOverallTime, 1000);
+
+  // 문제 목록 섞기 (문제 순서만)
+  questions = [...allQuestionsData];
+  shuffleArray(questions);
+
+  currentQuestionIndex = 0;
+  showQuestion();
+  updateHUD();
+}
+
+/* ------------------------------------------------------------------------
+   [문제 표시]
+------------------------------------------------------------------------ */
+function showQuestion() {
+  // 범위 초과 시 게임 종료
+  if (currentQuestionIndex >= questions.length) {
+    endGame("모든 문제를 풀었습니다!");
+    return;
+  }
+
+  const questionObj = questions[currentQuestionIndex];
+  const questionArea = document.getElementById('questionArea');
+
+  let html = `
+    <div><strong>${questionObj.question}</strong></div>
+    <div>
+  `;
+  questionObj.answers.forEach((ans) => {
+    // 보기 클릭 시 checkAnswer에 전달
+    html += `<div class="answerChoice" onclick="checkAnswer('${ans}')">${ans}</div>`;
+  });
+  html += `</div>`;
+
+  questionArea.innerHTML = html;
+
+  renderMath(); // 수식 렌더링
+
+  // 시간제한(난이도별) 설정
+  currentTimer = difficultySettings[selectedDifficulty].time;
+  if (currentTimer === 9999) {
+    // 시간 무제한(하)
+    document.getElementById('timerDisplay').innerText = "시간제한 없음";
+  } else {
+    document.getElementById('timerDisplay').innerText = "";
+    startEnergyBar();
+  }
+}
+
+/* ------------------------------------------------------------------------
+   [정답 체크 - startsWith로 비교]
+   - 사용자가 고른 answer => 예) "(B) -3"
+   - questionObj.correct => 예) "(B)"
+   - "(B) -3".startsWith("(B)") -> true => 정답 처리
+------------------------------------------------------------------------ */
+function checkAnswer(selectedAns) {
+  const questionObj = questions[currentQuestionIndex];
+
+  // 앞뒤 공백 제거
+  selectedAns = selectedAns.trim();
+
+  // 정답 비교
+  if (selectedAns.startsWith(questionObj.correct)) {
+    // 정답
+    score += difficultySettings[selectedDifficulty].points;
+  } else {
+    // 오답
+    lives -= 1;
+    alert(`틀렸습니다. 정답: ${questionObj.correct}`);
+    if (lives <= 0) {
+      endGame("기회를 모두 소진했습니다. 게임 오버!");
+      return;
+    }
+  }
+
+  // 다음 문제
+  stopEnergyBar(); 
+  currentQuestionIndex++;
+  showQuestion();
+  updateHUD();
+}
+
+/* ------------------------------------------------------------------------
+   [에너지바 처리]
+------------------------------------------------------------------------ */
+function startEnergyBar() {
+  stopEnergyBar(); 
+  const bar = document.getElementById('energyBar');
+  let totalWidth = 100; 
+  bar.style.width = totalWidth + "%";
+
+  energyInterval = setInterval(() => {
+    totalWidth -= (100 / currentTimer) / 10; 
+    if (totalWidth <= 0) {
+      // 시간 초과 -> 기회 1 감소
+      bar.style.width = "0%";
+      clearInterval(energyInterval);
+      lives--;
+      alert("시간 초과! 기회가 1 감소합니다.");
+
+      if (lives <= 0) {
+        endGame("기회를 모두 소진했습니다. 게임 오버!");
+        return;
+      }
+      // 다음 문제
+      currentQuestionIndex++;
+      showQuestion();
+      updateHUD();
+    } else {
+      bar.style.width = totalWidth + "%";
+    }
+  }, 100); // 0.1초 간격
+}
+
+function stopEnergyBar() {
+  clearInterval(energyInterval);
+  const bar = document.getElementById('energyBar');
+  bar.style.width = "100%";
+}
+
+/* ------------------------------------------------------------------------
+   [HUD 업데이트]
+------------------------------------------------------------------------ */
+function updateHUD() {
+  document.getElementById('livesDisplay').innerText = `남은 기회: ${lives}`;
+  document.getElementById('scoreDisplay').innerText = `점수: ${score}`;
+}
+
+/* ------------------------------------------------------------------------
+   [전체 게임 시간 표시]
+------------------------------------------------------------------------ */
+function updateOverallTime() {
+  const now = Date.now();
+  const elapsed = Math.floor((now - gameStartTime) / 1000);
+  document.getElementById('overallTimeDisplay').innerText = `전체 경과 시간: ${elapsed}초`;
+}
+
+/* ------------------------------------------------------------------------
+   [게임 종료]
+------------------------------------------------------------------------ */
+function endGame(msg) {
+  stopEnergyBar();
+  clearInterval(overallTimerInterval);
+
+  document.getElementById('quizContainer').style.display = 'none';
+  document.getElementById('endContainer').style.display = 'block';
+  document.getElementById('endMessage').innerText = msg;
+  document.getElementById('finalScore').innerText = `최종 점수: ${score}`;
+}
+
+/* ------------------------------------------------------------------------
+   [점수 전송 버튼]
+------------------------------------------------------------------------ */
+document.getElementById('sendScoreBtn').addEventListener('click', () => {
+  const elapsed = Math.floor((Date.now() - gameStartTime) / 1000);
+  saveData("속도와 가속도", userName, score, elapsed);
+});
+</script>
+
+</body>
+</html>
